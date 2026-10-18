@@ -1798,16 +1798,19 @@ response = agent.run("Generate a market analysis report")
 
 ### Agent with MCP Integration
 
-A command string runs a local MCP server over stdio when the transport is `"stdio"`.
+To run a local MCP server over stdio, pass `command` and `args` in `mcp_config`. A string in `mcp_url` is never run as a command; it must start with `http://` or `https://`.
 
 ```python
 from swarms import Agent
+from swarms.schemas.mcp_schemas import MCPConnection
 
 agent = Agent(
     agent_name="MCP-Agent",
     model_name="claude-sonnet-4-6",
-    mcp_url="npx -y @modelcontextprotocol/server-filesystem /path/to/directory",
-    mcp_transport="stdio",
+    mcp_config=MCPConnection(
+        command="npx",
+        args=["-y", "@modelcontextprotocol/server-filesystem", "/path/to/directory"],
+    ),
     max_loops=3
 )
 

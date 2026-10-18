@@ -127,7 +127,7 @@ Every connection uses streamable HTTP unless you say otherwise; the URL alone do
 MCPManager(mcp_url="https://api.example.com/sse", transport="sse")
 ```
 
-Valid values are `streamable_http`, `sse`, `stdio`, and `auto`. With `auto`, a URL ending in `/sse` uses SSE and a value with no scheme, such as `"python server.py"`, uses stdio. A connection with `command` set always uses stdio:
+Valid values are `streamable_http`, `sse`, `stdio`, and `auto`. With `auto`, a URL ending in `/sse` uses SSE and anything else uses streamable HTTP. A URL must start with `http://` or `https://`; it is never run as a command. Only a connection with `command` set uses stdio, and the server process gets a minimal environment (`HOME`, `PATH`, `SHELL`, `TERM`, `USER`, `LOGNAME`) plus whatever you pass in `env`:
 
 ```python
 MCPConnection(command="python", args=["server.py"], env={"API_KEY": "env:API_KEY"})
