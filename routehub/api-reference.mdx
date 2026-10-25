@@ -1,0 +1,829 @@
+---
+title: RouteHub API reference
+sidebarTitle: API reference
+description: Signatures, parameters, return types and examples for completion, acompletion, get_model_info and every other public RouteHub function
+---
+
+Every function on this page is importable from the top-level `routehub` package unless noted. `import routehub` loads nothing until you first use a name, so importing is cheap.
+
+| Area | Functions |
+|---|---|
+| [Chat](#completion) | `completion`, `acompletion` |
+| [Embeddings](#embedding) | `embedding`, `aembedding` |
+| [Responses API](#responses) | `responses`, `aresponses` |
+| [Batches](#batched_completions) | `batched_completions`, `abatched_completions`, `BatchJob` |
+| [Providers](#get_llm_provider) | `get_llm_provider`, `PROVIDERS` |
+| [Model catalog](#get_model_info) | `get_model_info`, `get_max_tokens`, `supports_*`, `register_model`, `model_list`, `model_cost`, `clear_model_cache` |
+| [Model listing](#get_all_models) | `get_all_models`, `get_models`, `get_model`, `aget_all_models`, `aget_models`, `configured_providers`, `clear_cache` |
+| [Tokens](#token_counter) | `token_counter`, `encode`, `decode` |
+| [Reasoning](#get_reasoning_efforts) | `get_reasoning_efforts`, `REASONING_EFFORTS` |
+| [Exceptions](#exceptions) | `RateLimitError`, `ContextWindowExceededError` and the rest |
+
+---
+
+## completion
+
+Call any supported chat model with OpenAI-style arguments.
+
+```python
+routehub.completion(
+    model: str,
+    messages: list[dict] | None = None,
+    *,
+    stream: bool | None = None,
+    tools: list[dict] | None = None,
+    response_format: dict | type | None = None,
+    reasoning_effort: str | None = None,
+    # ...every other OpenAI chat parameter, plus the gateway options below
+    **kwargs,
+) -> ChatCompletion | ChatStream
+```
+
+### Returns
+
+<ResponseField name="ChatCompletion" type="openai.types.chat.ChatCompletion">
+  The OpenAI SDK's own response type, for every provider. With `stream=True`, a `ChatStream` that yields `openai.types.chat.ChatCompletionChunk` objects and works as a context manager.
+
+  <Expandable title="commonly used fields">
+    <ResponseField name="choices[0].message.content" type="str | None">
+      The reply text. `None` when the model only called tools.
+    </ResponseField>
+    <ResponseField name="choices[0].message.tool_calls" type="list | None">
+      Tool calls in the OpenAI format, or `None` when the model answered in text.
+    </ResponseField>
+    <ResponseField name="choices[0].message.reasoning_content" type="str">
+      Reasoning text, present only when the provider returned it. Read with `getattr`.
+    </ResponseField>
+    <ResponseField name="choices[0].message.thinking_blocks" type="list">
+      Claude's signed thinking blocks, present only when returned. Send them back on the assistant message in tool loops.
+    </ResponseField>
+    <ResponseField name="choices[0].finish_reason" type="str">
+      `stop`, `length`, `tool_calls` or `content_filter`.
+    </ResponseField>
+    <ResponseField name="usage" type="CompletionUsage">
+      `prompt_tokens`, `completion_tokens`, `total_tokens`, plus `prompt_tokens_details.cached_tokens` and `completion_tokens_details.reasoning_tokens` where the provider reports them.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Request parameters
+
+<ParamField path="model" type="str" required>
+  Provider-prefixed or bare model name, such as `"gpt-5.4"`, `"claude-sonnet-4-6"` or `"groq/llama-3.3-70b-versatile"`. See [Providers](/routehub/providers).
+</ParamField>
+
+<ParamField path="messages" type="list[dict]" required>
+  OpenAI-format chat messages. Content can be a string or a list of content blocks (text, images, files, `cache_control` markers). An empty list raises `BadRequestError`.
+</ParamField>
+
+<ParamField path="stream" type="bool">
+  Stream the reply as `ChatCompletionChunk` objects. Pair with `stream_options={"include_usage": True}` to get usage on the final chunk.
+</ParamField>
+
+<ParamField path="tools" type="list[dict]">
+  Tool definitions in the OpenAI format. Translated for Claude. Use `tool_choice` and `parallel_tool_calls` to control selection.
+</ParamField>
+
+<ParamField path="response_format" type="dict | type">
+  A pydantic model class for strict JSON-schema output, or a dict such as `{"type": "json_object"}`, sent as given.
+</ParamField>
+
+<ParamField path="reasoning_effort" type="str">
+  One of `"none"`, `"minimal"`, `"low"`, `"medium"`, `"high"` or `"xhigh"`. Mapped to a thinking budget or adaptive thinking on Claude. See [Reasoning](/routehub/reasoning).
+</ParamField>
+
+<ParamField path="thinking" type="dict">
+  Claude's thinking configuration, such as `{"type": "enabled", "budget_tokens": 2048}`. Wins over `reasoning_effort`.
+</ParamField>
+
+<ParamField path="max_tokens" type="int">
+  Output token cap. Sent as `max_completion_tokens` to OpenAI. Claude gets 4,096 when neither this nor `max_completion_tokens` is set.
+</ParamField>
+
+<Accordion title="All other request parameters">
+  `temperature`, `top_p`, `n`, `stream_options`, `stop`, `max_completion_tokens`, `modalities`, `prediction`, `audio`, `presence_penalty`, `frequency_penalty`, `logit_bias`, `user`, `verbosity`, `seed`, `tool_choice`, `logprobs`, `top_logprobs`, `parallel_tool_calls`, `web_search_options`, `functions` and `function_call` work as in the OpenAI chat API.
+
+  Any other keyword argument, such as `prompt_cache_key`, is sent in the request body unless `drop_params=True`. litellm-only arguments such as `metadata`, `caching` and `fallbacks` are accepted and ignored.
+</Accordion>
+
+### Gateway options
+
+<ParamField path="api_key" type="str">
+  API key. Defaults to the provider's environment variable, read on each call.
+</ParamField>
+
+<ParamField path="api_base" type="str">
+  Base URL override for a proxy, private endpoint or self-hosted server. `base_url` is an alias.
+</ParamField>
+
+<ParamField path="num_retries" type="int" default="2">
+  Retries on rate limits, server errors, timeouts and connection failures, with backoff that honours `retry-after`.
+</ParamField>
+
+<ParamField path="drop_params" type="bool" default="False">
+  Drop parameters the model rejects instead of raising `UnsupportedParamsError`.
+</ParamField>
+
+<ParamField path="timeout" type="float">
+  Request timeout in seconds. Overrides `request_timeout` (default `600.0`).
+</ParamField>
+
+<ParamField path="mock_response" type="str | Exception">
+  Return this text, or raise this exception, without calling a provider.
+</ParamField>
+
+<ParamField path="client" type="OpenAI | AsyncOpenAI | httpx.Client">
+  Your own preconfigured client. OpenAI SDK clients for OpenAI-compatible providers, httpx clients for Claude.
+</ParamField>
+
+<Accordion title="All other gateway options">
+  `api_version` (Azure), `custom_llm_provider`, `extra_headers`, `extra_body` (always sent), `ssl_verify` (default `True`, or a CA bundle path), `keepalive_expiry` (default `60.0`), `gzip` (Claude request bodies; `None` reads `ROUTEHUB_GZIP_ON`), `set_verbose` (default `False`) and `request_timeout` (default `600.0`). See [Configuration](/routehub/configuration).
+</Accordion>
+
+### Examples
+
+<CodeGroup>
+
+```python Basic
+import routehub
+
+response = routehub.completion(
+    model="gpt-5.4-mini",
+    messages=[{"role": "user", "content": "Summarize our Q3 risks in three bullets."}],
+    max_tokens=300,
+)
+print(response.choices[0].message.content)
+print(response.usage.total_tokens)
+```
+
+```python Streaming
+stream = routehub.completion(
+    model="claude-sonnet-4-6",
+    messages=messages,
+    stream=True,
+    stream_options={"include_usage": True},
+)
+with stream:
+    for chunk in stream:
+        if chunk.usage:
+            print("\nusage:", chunk.usage.total_tokens)
+        elif chunk.choices and chunk.choices[0].delta.content:
+            print(chunk.choices[0].delta.content, end="")
+```
+
+```python Tools
+weather = {
+    "type": "function",
+    "function": {
+        "name": "get_weather",
+        "description": "Get the weather for a city.",
+        "parameters": {
+            "type": "object",
+            "properties": {"city": {"type": "string"}},
+            "required": ["city"],
+        },
+    },
+}
+response = routehub.completion(
+    model="claude-sonnet-4-6", messages=messages, tools=[weather]
+)
+for call in response.choices[0].message.tool_calls or []:
+    print(call.function.name, call.function.arguments)
+```
+
+```python Structured output
+from pydantic import BaseModel
+
+
+class RiskReport(BaseModel):
+    title: str
+    severity: int
+
+
+response = routehub.completion(
+    model="gpt-5.4-mini", messages=messages, response_format=RiskReport
+)
+report = RiskReport.model_validate_json(response.choices[0].message.content)
+```
+
+```python Reasoning
+response = routehub.completion(
+    model="claude-sonnet-4-6",
+    messages=messages,
+    reasoning_effort="high",
+)
+message = response.choices[0].message
+print(getattr(message, "reasoning_content", None))
+print(response.usage.completion_tokens_details.reasoning_tokens)
+```
+
+```python Gateway options
+response = routehub.completion(
+    model="hosted_vllm/meta-llama/Llama-3.3-70B-Instruct",
+    messages=messages,
+    api_base="http://gpu-box:8000/v1",
+    num_retries=3,
+    timeout=30,
+    drop_params=True,
+)
+```
+
+```python Mock
+response = routehub.completion(
+    model="gpt-5.4-mini", messages=messages, mock_response="Approved."
+)
+assert response.choices[0].message.content == "Approved."
+```
+
+</CodeGroup>
+
+---
+
+## acompletion
+
+Async form of [`completion`](#completion). It takes exactly the same arguments and returns the same types.
+
+```python
+await routehub.acompletion(model: str, messages: list[dict] | None = None, **kwargs) -> ChatCompletion | AsyncChatStream
+```
+
+<ResponseField name="ChatCompletion" type="openai.types.chat.ChatCompletion">
+  The response. With `stream=True`, an `AsyncChatStream` of `ChatCompletionChunk` objects, used with `async for` and `async with`.
+</ResponseField>
+
+HTTP clients are cached per event loop, so concurrent calls reuse pooled connections.
+
+<CodeGroup>
+
+```python Basic
+import asyncio
+
+import routehub
+
+
+async def main():
+    response = await routehub.acompletion(
+        model="gpt-5.4-mini", messages=messages
+    )
+    print(response.choices[0].message.content)
+
+
+asyncio.run(main())
+```
+
+```python Streaming
+async def main():
+    stream = await routehub.acompletion(
+        model="claude-sonnet-4-6", messages=messages, stream=True
+    )
+    async with stream:
+        async for chunk in stream:
+            if chunk.choices:
+                print(chunk.choices[0].delta.content or "", end="")
+```
+
+```python Fan out
+async def main():
+    models = ["gpt-5.4-mini", "claude-sonnet-4-6", "gemini/gemini-3-flash-preview"]
+    responses = await asyncio.gather(
+        *(routehub.acompletion(model=m, messages=messages) for m in models),
+        return_exceptions=True,
+    )
+    for model, response in zip(models, responses):
+        print(model, response if isinstance(response, Exception)
+              else response.choices[0].message.content)
+```
+
+</CodeGroup>
+
+---
+
+## embedding
+
+Embed text with any OpenAI-compatible embeddings model.
+
+```python
+routehub.embedding(
+    model: str,
+    input: str | list[str],
+    dimensions: int | None = None,
+    encoding_format: str | None = None,
+    user: str | None = None,
+    **options,
+) -> CreateEmbeddingResponse
+```
+
+<ParamField path="model" type="str" required>
+  Embedding model, such as `"text-embedding-3-small"` or `"gemini/gemini-embedding-001"`.
+</ParamField>
+
+<ParamField path="input" type="str | list[str]" required>
+  Text or texts to embed.
+</ParamField>
+
+<ParamField path="dimensions" type="int">
+  Output dimensions, where the model supports it.
+</ParamField>
+
+<ParamField path="encoding_format" type="str">
+  `"float"` or `"base64"`.
+</ParamField>
+
+Also takes `api_key`, `api_base`, `base_url`, `api_version`, `custom_llm_provider`, `extra_headers`, `extra_body`, `num_retries`, `ssl_verify`, `keepalive_expiry`, `request_timeout`, `timeout` and `client`. There is no `mock_response`; pass a fake OpenAI client as `client=` in tests.
+
+<ResponseField name="CreateEmbeddingResponse" type="openai.types.CreateEmbeddingResponse">
+  `data[i].embedding` holds each vector, in input order. `usage.prompt_tokens` holds the token count.
+</ResponseField>
+
+<CodeGroup>
+
+```python Sync
+response = routehub.embedding(
+    model="text-embedding-3-small",
+    input=["first text", "second text"],
+    dimensions=512,
+)
+vectors = [item.embedding for item in response.data]
+```
+
+```python Async
+response = await routehub.aembedding(
+    model="mistral/mistral-embed", input="hello"
+)
+```
+
+</CodeGroup>
+
+`aembedding` is the async form, with the same arguments. Claude models raise `BadRequestError`, because Anthropic has no embeddings API.
+
+---
+
+## responses
+
+Call a model through the OpenAI Responses API.
+
+```python
+routehub.responses(model: str, **kwargs) -> Response | Stream[ResponseStreamEvent]
+await routehub.aresponses(model: str, **kwargs) -> Response | AsyncStream[ResponseStreamEvent]
+```
+
+<ParamField path="model" type="str" required>
+  Provider-prefixed or bare model name for a provider that serves the Responses API, such as OpenAI.
+</ParamField>
+
+<ParamField path="**kwargs" type="Any">
+  Any Responses API parameter (`input`, `instructions`, `tools`, `reasoning`, `stream` and so on), plus `completion`'s gateway options except `mock_response`.
+</ParamField>
+
+<ResponseField name="Response" type="openai.types.responses.Response">
+  The SDK's own `Response`, or its event stream when `stream=True`.
+</ResponseField>
+
+```python
+response = routehub.responses(
+    model="gpt-5.4",
+    input="Write a one-line release note for a faster import.",
+    reasoning={"effort": "low"},
+)
+print(response.output_text)
+```
+
+---
+
+## batched_completions
+
+Run many chat requests through OpenAI's Batch API, Groq's Batch API or Anthropic's Message Batches API, at about half the price of regular calls.
+
+```python
+routehub.batched_completions(
+    model: str,
+    requests: list[dict],
+    *,
+    wait: bool = True,
+    poll_interval: float = 30,
+    timeout: float = 86400,
+    **kwargs,
+) -> list[ChatCompletion | Exception | None] | BatchJob
+```
+
+<ParamField path="model" type="str" required>
+  An OpenAI, Groq or Claude model, such as `"gpt-5.4-mini"`, `"groq/llama-3.1-8b-instant"` or `"claude-sonnet-4-6"`. Other providers raise `BadRequestError`.
+</ParamField>
+
+<ParamField path="requests" type="list[dict]" required>
+  `completion` arguments for each request, such as `messages` and `max_tokens`. Cannot be empty.
+</ParamField>
+
+<ParamField path="wait" type="bool" default="True">
+  Poll until the batch finishes and return its results. When `False`, return a [`BatchJob`](#batchjob) at once.
+</ParamField>
+
+<ParamField path="poll_interval" type="float" default="30">
+  Seconds between status checks.
+</ParamField>
+
+<ParamField path="timeout" type="float" default="86400">
+  Seconds to wait before raising `Timeout`. The batch keeps running and `BatchJob` can still collect it.
+</ParamField>
+
+<ParamField path="**kwargs" type="Any">
+  `completion` arguments shared by every request, such as `api_key`, `temperature` or `client`.
+</ParamField>
+
+<ResponseField name="results" type="list">
+  One `ChatCompletion` per request in request order, or the RouteHub exception for a request that failed. A `BatchJob` when `wait=False`.
+</ResponseField>
+
+<CodeGroup>
+
+```python Wait for results
+results = routehub.batched_completions(
+    model="gpt-5.4-mini",
+    requests=[
+        {"messages": [{"role": "user", "content": f"Classify: {t}"}]}
+        for t in tickets
+    ],
+    temperature=0,
+)
+for result in results:
+    if isinstance(result, Exception):
+        print("failed:", result)
+    else:
+        print(result.choices[0].message.content)
+```
+
+```python Submit and return
+job = routehub.batched_completions(
+    model="claude-sonnet-4-6", requests=requests, wait=False
+)
+print(job.id, job.status())
+```
+
+```python Async
+results = await routehub.abatched_completions(
+    model="gpt-5.4-mini", requests=requests
+)
+```
+
+</CodeGroup>
+
+`abatched_completions` takes the same arguments and keeps the event loop free while the batch runs.
+
+### BatchJob
+
+A submitted batch, rebuildable from its provider and ID in any process.
+
+```python
+routehub.BatchJob(
+    provider: str,
+    id: str,
+    client: Any = None,
+    api_key: str | None = None,
+    api_base: str | None = None,
+)
+```
+
+| Method | Returns |
+|---|---|
+| `status()` | The provider's status, such as `"in_progress"` or `"completed"`, or `"ended"` for Anthropic |
+| `results()` | One `ChatCompletion` or RouteHub exception per request in submission order, or `None` for a request with no result, such as one a cancelled batch never ran |
+| `cancel()` | The status after the request, usually `"cancelling"`, or `"canceling"` for Anthropic |
+
+```python
+job = routehub.BatchJob("anthropic", "msgbatch_01...")
+if job.status() == "ended":
+    results = job.results()
+```
+
+---
+
+## get_llm_provider
+
+Resolve a model string to its provider, API key and base URL without sending a request.
+
+```python
+routehub.get_llm_provider(
+    model: str,
+    custom_llm_provider: str | None = None,
+    api_base: str | None = None,
+    api_key: str | None = None,
+) -> tuple[str, str, str | None, str | None]
+```
+
+<ResponseField name="(model, provider, api_key, api_base)" type="tuple">
+  The bare model name, provider, API key and base URL. Raises `BadRequestError` when no provider can be determined.
+</ResponseField>
+
+```python
+model, provider, api_key, api_base = routehub.get_llm_provider(
+    "groq/llama-3.3-70b-versatile"
+)
+print(model, provider)  # llama-3.3-70b-versatile groq
+
+routehub.get_llm_provider("my-model", api_base="http://localhost:8000/v1")
+# ('my-model', 'openai_like', 'EMPTY', 'http://localhost:8000/v1')
+```
+
+### PROVIDERS
+
+A dict of every provider name to its `Provider` record: `name`, `base_url`, `key_env`, `base_env`, `native`, `default_key` and `base_suffix`.
+
+```python
+routehub.PROVIDERS["groq"].key_env   # ('GROQ_API_KEY',)
+sorted(routehub.PROVIDERS)           # every supported prefix
+```
+
+---
+
+## get_model_info
+
+Return the metadata for a model from the live OpenRouter catalog, the built-in embedding table, or your registered models.
+
+```python
+routehub.get_model_info(model: str, custom_llm_provider: str | None = None) -> dict
+```
+
+<ParamField path="model" type="str" required>
+  A bare or provider-prefixed model name. Anthropic-style names, dated names and serving-provider IDs such as `groq/llama-3.3-70b-versatile` are matched to the vendor's entry.
+</ParamField>
+
+<ParamField path="custom_llm_provider" type="str">
+  Explicit provider, reported back as `provider`.
+</ParamField>
+
+<ResponseField name="info" type="dict">
+  Raises `ModelNotMappedError` when the model is unknown.
+
+  <Expandable title="fields">
+    <ResponseField name="key" type="str">The matched catalog ID, such as `anthropic/claude-sonnet-4.6`.</ResponseField>
+    <ResponseField name="name" type="str">Display name.</ResponseField>
+    <ResponseField name="provider" type="str">The RouteHub provider that serves it. `litellm_provider` holds the same value.</ResponseField>
+    <ResponseField name="mode" type="str">`chat` or `embedding`.</ResponseField>
+    <ResponseField name="max_input_tokens" type="int">Context window.</ResponseField>
+    <ResponseField name="max_output_tokens" type="int">Output limit. `max_tokens` holds the same value.</ResponseField>
+    <ResponseField name="input_cost_per_token" type="float | None">USD per input token.</ResponseField>
+    <ResponseField name="output_cost_per_token" type="float | None">USD per output token.</ResponseField>
+    <ResponseField name="cache_read_input_token_cost" type="float | None">USD per cached input token read.</ResponseField>
+    <ResponseField name="cache_creation_input_token_cost" type="float | None">USD per input token written to cache.</ResponseField>
+    <ResponseField name="supports_*" type="bool | None">Capability flags, such as `supports_vision`, `supports_reasoning` and `supports_function_calling`. `None` when unknown.</ResponseField>
+    <ResponseField name="supported_openai_params" type="list[str]">Request parameters the catalog lists for the model.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+<CodeGroup>
+
+```python Lookup
+info = routehub.get_model_info("claude-sonnet-4-6")
+info["key"]                    # 'anthropic/claude-sonnet-4.6'
+info["max_input_tokens"]       # 1000000
+info["max_output_tokens"]      # 128000
+info["input_cost_per_token"]   # 3e-06
+info["output_cost_per_token"]  # 1.5e-05
+info["supports_reasoning"]     # True
+```
+
+```python Cost of a call
+response = routehub.completion(model="claude-sonnet-4-6", messages=messages)
+info = routehub.get_model_info("claude-sonnet-4-6")
+cost = (
+    response.usage.prompt_tokens * (info["input_cost_per_token"] or 0)
+    + response.usage.completion_tokens * (info["output_cost_per_token"] or 0)
+)
+```
+
+```python Unknown model
+try:
+    routehub.get_model_info("acme-internal-model")
+except routehub.ModelNotMappedError:
+    routehub.register_model({"acme-internal-model": {"max_input_tokens": 32768}})
+```
+
+</CodeGroup>
+
+The catalog is fetched on first use and cached for five minutes. The last good copy is kept on disk at `ROUTEHUB_CACHE_DIR` for offline runs. See [Model catalog](/routehub/model-catalog).
+
+### get_max_tokens
+
+```python
+routehub.get_max_tokens(model: str) -> int | None
+```
+
+Returns the model's output token limit. Raises `ModelNotMappedError` for unknown models.
+
+```python
+routehub.get_max_tokens("gpt-5.4-mini")  # 128000
+```
+
+### supports_* checks
+
+Each takes `(model: str, custom_llm_provider: str | None = None)` and returns `bool`. Unknown models return `False`.
+
+| Function | True when the model |
+|---|---|
+| `supports_vision` | accepts image input |
+| `supports_function_calling` | supports tools |
+| `supports_parallel_function_calling` | can call several tools in one turn |
+| `supports_tool_choice` | accepts `tool_choice` |
+| `supports_response_schema` | supports JSON-schema structured output |
+| `supports_system_messages` | accepts system messages |
+| `supports_prompt_caching` | honours `cache_control` markers (Claude, directly or through OpenRouter) |
+| `supports_reasoning` | supports reasoning or thinking |
+| `supports_pdf_input` | accepts PDF input |
+| `supports_audio_input` | accepts audio input |
+| `supports_audio_output` | can return audio |
+| `supports_web_search` | supports built-in web search |
+| `supports_computer_use` | supports computer use |
+| `supports_assistant_prefill` | continues a prefilled assistant message |
+
+```python
+routehub.supports_vision("gpt-5.4-mini")                    # True
+routehub.supports_prompt_caching("claude-sonnet-4-6")       # True
+routehub.supports_prompt_caching("gpt-5.4-mini")            # False
+routehub.supports_function_calling("groq/llama-3.3-70b-versatile")
+```
+
+### register_model
+
+Add or override models in litellm's model-info shape. Registered entries take priority over catalog data and never expire.
+
+```python
+routehub.register_model(model_cost: dict | str) -> dict
+```
+
+<ParamField path="model_cost" type="dict | str" required>
+  A dict of model name to info, or a path to a JSON file of it. Fields merge into an earlier registration of the same name.
+</ParamField>
+
+<ResponseField name="registered" type="dict">
+  All registered models.
+</ResponseField>
+
+```python
+routehub.register_model({
+    "acme-support-ft": {
+        "max_input_tokens": 32768,
+        "max_output_tokens": 4096,
+        "supports_function_calling": True,
+        "input_cost_per_token": 0.000002,
+    }
+})
+routehub.register_model("models/private.json")
+```
+
+### model_list, model_cost and clear_model_cache
+
+| Name | What it is |
+|---|---|
+| `model_list` | Every known model ID. Membership tests resolve aliases, so `"claude-sonnet-4-6" in routehub.model_list` is `True`. |
+| `model_cost` | A dict of every model ID to its info, catalog plus built-in plus registered. |
+| `clear_model_cache()` | Forget the cached catalog so the next lookup fetches again. Registered models are kept. |
+
+Both `model_list` and `model_cost` refresh with the catalog, so read them from `routehub` each time rather than binding them once.
+
+---
+
+## get_all_models
+
+List models from each provider's own models API, concurrently, in one consistent shape. Import these from `routehub.get_all_models`.
+
+```python
+from routehub.get_all_models import get_all_models
+
+get_all_models(
+    providers: Iterable[str] | None = None,
+    timeout: float = 10,
+    refresh: bool = False,
+) -> list[dict]
+```
+
+<ParamField path="providers" type="Iterable[str]">
+  Providers to list. Every supported source with a key configured, plus OpenRouter, when omitted.
+</ParamField>
+
+<ParamField path="timeout" type="float" default="10">
+  Per-request timeout in seconds.
+</ParamField>
+
+<ParamField path="refresh" type="bool" default="False">
+  Ignore the five-minute cache and fetch again.
+</ParamField>
+
+<ResponseField name="models" type="list[dict]">
+  Entries grouped by provider. A provider that fails or has no key contributes nothing.
+
+  <Expandable title="fields">
+    `id`, `provider`, `model`, `name`, `type`, `context_window`, `max_output_tokens`, `input_modalities`, `output_modalities`, `supports_vision`, `supports_function_calling`, `supports_reasoning`, `supports_structured_output`, `input_cost_per_token`, `output_cost_per_token`, `created`, `endpoints` and the provider's `raw` record. A field is `None` where the provider doesn't report it.
+  </Expandable>
+</ResponseField>
+
+| Function | Purpose |
+|---|---|
+| `get_models(provider, api_key=None, timeout=10, refresh=False)` | One provider's models. Empty when no key is configured or the request fails. |
+| `get_model(provider, model, api_key=None, timeout=10)` | One model from the provider's per-model endpoint, or `None`. For OpenRouter, `endpoints` lists every host serving it. |
+| `aget_all_models(...)`, `aget_models(...)` | Async forms, sharing the same cache. |
+| `configured_providers()` | Providers whose models can be listed right now. |
+| `clear_cache()` | Forget every cached listing. |
+
+<CodeGroup>
+
+```python List
+from routehub.get_all_models import get_all_models
+
+models = get_all_models()
+chat = [m for m in models if m["type"] == "chat"]
+cheap = sorted(
+    (m for m in chat if m["input_cost_per_token"]),
+    key=lambda m: m["input_cost_per_token"],
+)[:5]
+```
+
+```python One model
+from routehub.get_all_models import get_model
+
+get_model("anthropic", "claude-sonnet-4-6")
+get_model("openrouter", "anthropic/claude-sonnet-4.6")["endpoints"]
+```
+
+```python Async
+from routehub.get_all_models import aget_all_models
+
+models = await aget_all_models(["openai", "anthropic", "groq"])
+```
+
+</CodeGroup>
+
+---
+
+## token_counter
+
+Count the tokens in a text or a chat message list.
+
+```python
+routehub.token_counter(
+    model: str = "",
+    text: str | None = None,
+    messages: list[dict] | None = None,
+) -> int
+```
+
+<ParamField path="model" type="str">
+  Model whose tokenizer to use. Models tiktoken doesn't know use `o200k_base`, so counts for non-OpenAI models are estimates.
+</ParamField>
+
+<ParamField path="text" type="str">
+  A plain string to count.
+</ParamField>
+
+<ParamField path="messages" type="list[dict]">
+  Chat messages to count, including message overhead.
+</ParamField>
+
+### encode and decode
+
+```python
+routehub.encode(model: str = "", text: str = "", custom_tokenizer: Any = None) -> list[int]
+routehub.decode(model: str = "", tokens: list[int] | None = None) -> str
+```
+
+```python
+routehub.token_counter(model="gpt-5.4-mini", messages=messages)
+routehub.token_counter(model="gpt-5.4-mini", text="a plain string")  # 3
+
+ids = routehub.encode(model="gpt-5.4-mini", text="hello world")      # [24912, 2375]
+routehub.decode(model="gpt-5.4-mini", tokens=ids)                    # 'hello world'
+```
+
+When no tokenizer can be loaded, for example offline before tiktoken has cached its files, counts fall back to four bytes per token.
+
+---
+
+## get_reasoning_efforts
+
+```python
+routehub.get_reasoning_efforts() -> tuple[str, ...]
+routehub.REASONING_EFFORTS
+```
+
+Returns the values `reasoning_effort` accepts: `("none", "minimal", "low", "medium", "high", "xhigh")`.
+
+```python
+effort = "high"
+assert effort in routehub.get_reasoning_efforts()
+```
+
+---
+
+## Exceptions
+
+Every provider failure is raised as one of these, importable from `routehub` or `routehub.exceptions`. Each subclasses the matching OpenAI SDK exception and carries `status_code`, `llm_provider`, `model` and `message`.
+
+`BadRequestError`, `UnsupportedParamsError`, `ContextWindowExceededError`, `ContentPolicyViolationError`, `AuthenticationError`, `PermissionDeniedError`, `NotFoundError`, `UnprocessableEntityError`, `RateLimitError`, `ServiceUnavailableError`, `InternalServerError`, `APIError`, `APIConnectionError`, `Timeout`, `OpenAIError` and `ModelNotMappedError`.
+
+```python
+try:
+    routehub.completion(model="gpt-5.4-mini", messages=messages)
+except routehub.RateLimitError as error:
+    print(error.status_code, error.llm_provider, error.model)
+```
+
+See [Error handling](/routehub/error-handling) for when each one is raised.

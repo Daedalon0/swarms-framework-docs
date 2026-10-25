@@ -256,6 +256,7 @@
           {
             "group": "Reference",
             "pages": [
+              "routehub/api-reference",
               "routehub/configuration",
               "routehub/error-handling",
               "routehub/model-catalog",
