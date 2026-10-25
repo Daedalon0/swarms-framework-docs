@@ -266,6 +266,17 @@
         ]
       },
       {
+        "tab": "Swarms API",
+        "groups": [
+          {
+            "group": "Swarms API",
+            "pages": [
+              "swarms-api/overview"
+            ]
+          }
+        ]
+      },
+      {
         "tab": "Examples",
         "groups": [
           {

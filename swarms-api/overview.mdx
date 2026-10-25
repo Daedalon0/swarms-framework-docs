@@ -1,0 +1,258 @@
+---
+title: Swarms API
+sidebarTitle: Overview
+description: Run agents and multi-agent swarms over HTTP with the hosted Swarms API at api.swarms.world
+---
+
+The Swarms API runs agents and multi-agent swarms for you, with no infrastructure to manage. You send an agent or swarm definition and a task over HTTP, and the API runs it and returns the outputs and usage.
+
+<CardGroup cols={2}>
+  <Card title="API documentation" icon="book" href="https://docs.swarms.ai">
+    Full guides and endpoint reference at docs.swarms.ai
+  </Card>
+  <Card title="Get an API key" icon="key" href="https://swarms.world/platform/api-keys">
+    Create a key on the Swarms platform
+  </Card>
+</CardGroup>
+
+## Base URL
+
+The official production URL is:
+
+```text
+https://api.swarms.world
+```
+
+Every endpoint is versioned under `/v1`, such as `https://api.swarms.world/v1/agent/completions`. The full API documentation is at [docs.swarms.ai](https://docs.swarms.ai).
+
+## Authentication
+
+Create a key on the [API keys page](https://swarms.world/platform/api-keys) and send it in the `x-api-key` header. `Authorization: Bearer <key>` also works.
+
+```bash
+export SWARMS_API_KEY="your-api-key"
+```
+
+<Warning>
+  Keep your key server-side. Don't ship it in browser or mobile code, and never commit it.
+</Warning>
+
+## Run an agent
+
+`POST /v1/agent/completions` runs one agent on a task.
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST https://api.swarms.world/v1/agent/completions \
+  -H "x-api-key: $SWARMS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agent_config": {
+      "agent_name": "Research-Analyst",
+      "system_prompt": "You are a concise financial research analyst.",
+      "model_name": "gpt-5.4",
+      "max_loops": 1,
+      "max_tokens": 4096
+    },
+    "task": "Summarize the main risks of a single-region deployment."
+  }'
+```
+
+```python Python
+import os
+
+import requests
+
+response = requests.post(
+    "https://api.swarms.world/v1/agent/completions",
+    headers={"x-api-key": os.environ["SWARMS_API_KEY"]},
+    json={
+        "agent_config": {
+            "agent_name": "Research-Analyst",
+            "system_prompt": "You are a concise financial research analyst.",
+            "model_name": "gpt-5.4",
+            "max_loops": 1,
+            "max_tokens": 4096,
+        },
+        "task": "Summarize the main risks of a single-region deployment.",
+    },
+    timeout=300,
+)
+response.raise_for_status()
+result = response.json()
+print(result["outputs"])
+print(result["usage"])
+```
+
+</CodeGroup>
+
+The response carries `job_id`, `success`, `name`, `outputs`, `usage` and `timestamp`.
+
+<Accordion title="Common agent_config fields">
+  | Field | Default | Purpose |
+  |---|---|---|
+  | `agent_name` | none | Name that identifies the agent |
+  | `system_prompt` | none | Instructions that guide the agent |
+  | `model_name` | `claude-sonnet-5` | Model the agent runs on |
+  | `max_loops` | `1` | Iterations, or `"auto"` for autonomous mode |
+  | `max_tokens` | `16000` | Output token cap |
+  | `temperature` | none | Sampling temperature |
+  | `reasoning_effort` | none | Reasoning depth for models that support it |
+  | `fallback_models` | none | Ordered list of models to try if the primary model errors |
+  | `mcp_url`, `mcp_urls` | none | MCP servers the agent can use |
+  | `tools_list_dictionary` | none | Tool definitions the agent can call |
+  | `streaming_on` | `false` | Stream the agent's output |
+</Accordion>
+
+## Run a swarm
+
+`POST /v1/swarm/completions` runs several agents together. Set `swarm_type` to choose how they coordinate:
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST https://api.swarms.world/v1/swarm/completions \
+  -H "x-api-key: $SWARMS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Report Pipeline",
+    "swarm_type": "SequentialWorkflow",
+    "task": "Write a one-page brief on the EV battery supply chain.",
+    "agents": [
+      {
+        "agent_name": "Researcher",
+        "system_prompt": "Gather the key facts and figures.",
+        "model_name": "gpt-5.4"
+      },
+      {
+        "agent_name": "Writer",
+        "system_prompt": "Turn the research into a clear one-page brief.",
+        "model_name": "claude-sonnet-4-6"
+      }
+    ]
+  }'
+```
+
+```python Python
+import os
+
+import requests
+
+response = requests.post(
+    "https://api.swarms.world/v1/swarm/completions",
+    headers={"x-api-key": os.environ["SWARMS_API_KEY"]},
+    json={
+        "name": "Report Pipeline",
+        "swarm_type": "SequentialWorkflow",
+        "task": "Write a one-page brief on the EV battery supply chain.",
+        "agents": [
+            {
+                "agent_name": "Researcher",
+                "system_prompt": "Gather the key facts and figures.",
+                "model_name": "gpt-5.4",
+            },
+            {
+                "agent_name": "Writer",
+                "system_prompt": "Turn the research into a clear one-page brief.",
+                "model_name": "claude-sonnet-4-6",
+            },
+        ],
+    },
+    timeout=600,
+)
+response.raise_for_status()
+result = response.json()
+print(result["output"])
+```
+
+</CodeGroup>
+
+The response carries `job_id`, `status`, `swarm_name`, `swarm_type`, `output`, `number_of_agents`, `execution_time` and `usage`.
+
+### Swarm types
+
+| `swarm_type` | How agents work together |
+|---|---|
+| `SequentialWorkflow` | One after another, each agent's output feeding the next |
+| `ConcurrentWorkflow` | All in parallel on the same task |
+| `AgentRearrange` | An explicit flow set with `rearrange_flow`, mixing sequential (`->`) and concurrent (`,`) steps |
+| `MixtureOfAgents` | Specialists in parallel, then an aggregator synthesizes their outputs |
+| `HierarchicalSwarm` | A director decomposes the task and delegates to workers |
+| `GroupChat` | A multi-turn conversation between agents |
+| `MultiAgentRouter` | A router dispatches each task to the best specialist |
+| `MajorityVoting` | Independent answers, majority wins |
+| `CouncilAsAJudge` | A council rates candidate answers and a judge rules |
+| `LLMCouncil` | A panel deliberates and a chairman synthesizes |
+| `DebateWithJudge` | Agents argue opposing sides and a judge decides |
+| `HeavySwarm` | A deep question, research and synthesis pipeline |
+| `RoundRobin` | Agents take turns in a fixed rotation |
+| `PlannerWorkerSwarm` | Planners split the task and workers execute from a shared queue |
+
+`GET /v1/swarms/available` returns the current list with descriptions.
+
+## Use OpenAI-compatible clients
+
+`POST /v1/chat/completions` accepts the standard OpenAI request and returns the standard OpenAI response, streaming included. Point any OpenAI SDK at the Swarms API:
+
+<CodeGroup>
+
+```python OpenAI SDK
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="https://api.swarms.world/v1",
+    api_key=os.environ["SWARMS_API_KEY"],
+)
+response = client.chat.completions.create(
+    model="gpt-5.4",
+    messages=[{"role": "user", "content": "Name three uses for multi-agent systems."}],
+)
+print(response.choices[0].message.content)
+```
+
+```python RouteHub
+import os
+
+import routehub
+
+response = routehub.completion(
+    model="openai_like/gpt-5.4",
+    messages=[{"role": "user", "content": "Name three uses for multi-agent systems."}],
+    api_base="https://api.swarms.world/v1",
+    api_key=os.environ["SWARMS_API_KEY"],
+)
+print(response.choices[0].message.content)
+```
+
+</CodeGroup>
+
+The endpoint also takes a Swarms extension, `max_loops` (1 to 50), for multi-step agent reasoning. `POST /v1/messages` is Anthropic-compatible and `POST /v1/responses` is compatible with the OpenAI Responses API.
+
+## Endpoints
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/v1/agent/completions` | Run one agent |
+| `POST` | `/v1/agent/batch/completions` | Run several agent completions in one request |
+| `POST` | `/v1/swarm/completions` | Run a multi-agent swarm |
+| `POST` | `/v1/swarm/batch/completions` | Run several swarms in one request |
+| `POST` | `/v1/reasoning-agent/completions` | Run a reasoning agent |
+| `POST` | `/v1/graph-workflow/completions` | Run a graph workflow |
+| `POST` | `/v1/batched-grid-workflow/completions` | Run a batched grid workflow |
+| `POST` | `/v1/auto-agent-builder/completions` | Generate agent configurations from a task |
+| `POST` | `/v1/chat/completions` | OpenAI-compatible chat completions |
+| `POST` | `/v1/messages` | Anthropic-compatible messages |
+| `POST` | `/v1/responses` | OpenAI-compatible Responses API |
+| `GET` | `/v1/swarms/available` | List swarm types |
+| `GET` | `/v1/models/available` | List available models |
+| `GET` | `/v1/models/pricing` | Model pricing |
+| `GET` | `/v1/job/{job_id}` | Fetch a completion by job ID |
+| `GET` | `/v1/account/credits` | Credit balance |
+| `GET` | `/v1/account/logs` | Request logs |
+| `GET` | `/v1/rate/limits` | Rate limits and current usage |
+| `GET` | `/health` | Health check |
+
+For request and response schemas, guides and examples for every endpoint, see the [Swarms API documentation](https://docs.swarms.ai).
