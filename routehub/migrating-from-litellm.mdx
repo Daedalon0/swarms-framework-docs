@@ -1,0 +1,68 @@
+---
+title: Migrating from litellm
+description: Swap litellm for RouteHub by changing imports, moving global settings into calls, and reading OpenAI SDK objects
+---
+
+RouteHub uses litellm's function names and module paths, so most code only changes its imports. The tables below cover what doesn't carry over.
+
+## Imports
+
+| litellm | RouteHub |
+|---|---|
+| `pip install litellm` | `pip install routehub` |
+| `import litellm`, `litellm.completion(...)` | `import routehub`, `routehub.completion(...)` |
+| `from litellm import completion, acompletion, embedding` | `from routehub import completion, acompletion, embedding` |
+| `from litellm.utils import get_model_info, supports_vision` | `from routehub.utils import get_model_info, supports_vision` |
+| `from litellm.exceptions import AuthenticationError` | `from routehub.exceptions import AuthenticationError` |
+| `from litellm import model_list, encode` | `from routehub import model_list, encode` |
+
+## Settings
+
+| litellm | RouteHub |
+|---|---|
+| `litellm.drop_params = True` | `completion(..., drop_params=True)` |
+| `litellm.num_retries = 3` | `completion(..., num_retries=3)` |
+| `litellm.ssl_verify = False` | `completion(..., ssl_verify=False)` |
+| `litellm.set_verbose = True` | `completion(..., set_verbose=True)` |
+| `litellm.request_timeout = 30` | `completion(..., timeout=30)` |
+| `litellm.api_key = ...`, `litellm.api_base = ...` | `completion(..., api_key=..., api_base=...)`, or the provider's environment variable |
+
+RouteHub reads no module attributes, so `routehub.drop_params = True` does nothing. To apply settings to every call, wrap the function once:
+
+```python
+from functools import partial
+
+import routehub
+
+completion = partial(routehub.completion, num_retries=3, drop_params=True)
+```
+
+## Objects
+
+| litellm | RouteHub |
+|---|---|
+| `ModelResponse` | `openai.types.chat.ChatCompletion` |
+| `CustomStreamWrapper` | an iterator of `openai.types.chat.ChatCompletionChunk`, usable in `with` (async: `async for`, `async with`) |
+| `EmbeddingResponse` | `openai.types.CreateEmbeddingResponse` |
+| `response["choices"][0]["message"]["content"]` | `response.choices[0].message.content` |
+
+Responses are pydantic models. Use attribute access, or `response.model_dump()` for a dict. Dictionary access raises `TypeError`.
+
+## Behaviour that differs
+
+- litellm-only keyword arguments such as `metadata`, `caching`, `cache`, `fallbacks`, `retry_policy`, `logger_fn` and any `litellm_*` name are accepted and ignored. Fallbacks and response caching don't happen, so handle them in your code. See [Fall back to another model](/routehub/error-handling#fall-back-to-another-model).
+- Any other unknown keyword argument is sent to the provider in the request body unless `drop_params=True`. A misspelt argument isn't caught locally.
+- Requests to OpenAI send `max_tokens` as `max_completion_tokens`, which every current OpenAI chat model accepts and reasoning models require.
+- There is no `Router`, no callbacks, no proxy server and no `completion_cost`. For cost, multiply `response.usage` token counts by the prices from `get_model_info`. See [Compute the cost of a call](/routehub/model-catalog#compute-the-cost-of-a-call).
+- `get_model_info`, `model_cost` and `model_list` come from OpenRouter's live model list, not a bundled price file. Unknown models raise `ModelNotMappedError`; add them with `register_model`.
+- Claude is called through Anthropic's native Messages API, so `cache_control`, extended thinking and cached-token usage work as they do on Anthropic.
+
+## Teach your coding agent
+
+RouteHub ships an [Agent Skill](https://agentskills.io) that shows coding agents how to call RouteHub correctly, including which litellm habits break. To install it for Claude Code, copy the folder into `~/.claude/skills/` for every project, or into a project's `.claude/skills/`:
+
+```bash
+git clone https://github.com/The-Swarm-Corporation/RouteHub.git
+mkdir -p ~/.claude/skills
+cp -r RouteHub/skills/routehub ~/.claude/skills/
+```

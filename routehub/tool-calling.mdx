@@ -1,0 +1,80 @@
+---
+title: Tool calling
+description: Define tools once in the OpenAI format and call them on any provider, Claude included
+---
+
+Tools use the OpenAI format for every provider. For Claude, RouteHub translates tool definitions, calls and results to Anthropic's format and back, parallel calls included.
+
+## Define a tool
+
+```python
+weather_tool = {
+    "type": "function",
+    "function": {
+        "name": "get_weather",
+        "description": "Get the weather for a city.",
+        "parameters": {
+            "type": "object",
+            "properties": {"city": {"type": "string"}},
+            "required": ["city"],
+        },
+    },
+}
+```
+
+## Run a tool loop
+
+Append the assistant message, run each requested tool, append the results as `tool` messages, and call the model again:
+
+```python
+import json
+
+import routehub
+
+
+def get_weather(city):
+    return f"Sunny in {city}"
+
+
+chat = [{"role": "user", "content": "What's the weather in Paris and Tokyo?"}]
+
+while True:
+    response = routehub.completion(
+        model="claude-sonnet-4-6", messages=chat, tools=[weather_tool]
+    )
+    message = response.choices[0].message
+    chat.append(message.model_dump(exclude_none=True))
+    if not message.tool_calls:
+        break
+    for call in message.tool_calls:
+        result = get_weather(**json.loads(call.function.arguments))
+        chat.append(
+            {"role": "tool", "tool_call_id": call.id, "content": result}
+        )
+
+print(message.content)
+```
+
+`tool_calls` is `None` when the model answers in text.
+
+<Tip>
+  Append `message.model_dump(exclude_none=True)` rather than building the assistant message by hand. It keeps Claude's `thinking_blocks`, which Anthropic requires back on multi-turn tool use with thinking, and RouteHub strips them for other providers.
+</Tip>
+
+## Control tool choice
+
+`tool_choice` and `parallel_tool_calls` work as in the OpenAI API:
+
+```python
+response = routehub.completion(
+    model="gpt-5.4-mini",
+    messages=chat,
+    tools=[weather_tool],
+    tool_choice={"type": "function", "function": {"name": "get_weather"}},
+    parallel_tool_calls=False,
+)
+```
+
+<Warning>
+  Claude 5.1 and later (Opus 5.5, Sonnet 5.5, Fable 5.1) reject a forced `tool_choice`, either `"required"` or a named tool. RouteHub raises `UnsupportedParamsError` before sending the request, or sends `"auto"` when you pass `drop_params=True`.
+</Warning>

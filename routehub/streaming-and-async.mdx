@@ -1,0 +1,104 @@
+---
+title: Streaming and async
+description: Stream ChatCompletionChunk objects, read usage from a stream, and call RouteHub from asyncio
+---
+
+## Stream a response
+
+Pass `stream=True` to `completion`. The stream yields `openai.types.chat.ChatCompletionChunk` objects for every provider, Claude included.
+
+```python
+import routehub
+
+messages = [{"role": "user", "content": "Write a haiku about routers."}]
+
+stream = routehub.completion(
+    model="claude-sonnet-4-6",
+    messages=messages,
+    stream=True,
+    stream_options={"include_usage": True},
+)
+with stream:
+    for chunk in stream:
+        if chunk.usage:
+            print("\nusage:", chunk.usage)
+        elif chunk.choices and chunk.choices[0].delta.content:
+            print(chunk.choices[0].delta.content, end="", flush=True)
+```
+
+With `stream_options={"include_usage": True}`, the final chunk carries `usage` and an empty `choices` list, exactly as OpenAI does. Check `chunk.choices` before indexing it.
+
+<Tip>
+  Use the stream in a `with` block so the connection is released if you stop reading early.
+</Tip>
+
+Errors raised mid-stream, such as an overloaded provider, are mapped to the same typed exceptions as non-streaming calls. See [Error handling](/routehub/error-handling).
+
+## Run async
+
+`acompletion` takes exactly the same arguments as `completion` and returns the same types:
+
+```python
+import asyncio
+
+import routehub
+
+
+async def main():
+    response = await routehub.acompletion(
+        model="gpt-5.4-mini", messages=messages
+    )
+    print(response.choices[0].message.content)
+
+
+asyncio.run(main())
+```
+
+## Stream async
+
+With `acompletion(..., stream=True)`, use `async for` and `async with`:
+
+```python
+async def main():
+    stream = await routehub.acompletion(
+        model="gpt-5.4-mini", messages=messages, stream=True
+    )
+    async with stream:
+        async for chunk in stream:
+            if chunk.choices:
+                print(chunk.choices[0].delta.content or "", end="")
+```
+
+## Fan out across models
+
+Async calls make it easy to send the same prompt to several providers at once:
+
+```python
+import asyncio
+
+import routehub
+
+MODELS = [
+    "gpt-5.4-mini",
+    "claude-sonnet-4-6",
+    "gemini/gemini-3-flash-preview",
+]
+
+
+async def ask_all(prompt: str):
+    messages = [{"role": "user", "content": prompt}]
+    responses = await asyncio.gather(
+        *(routehub.acompletion(model=m, messages=messages) for m in MODELS),
+        return_exceptions=True,
+    )
+    for model, response in zip(MODELS, responses):
+        if isinstance(response, Exception):
+            print(model, "failed:", response)
+        else:
+            print(model, response.choices[0].message.content)
+
+
+asyncio.run(ask_all("Name one risk of a single-region deployment."))
+```
+
+HTTP clients are cached per event loop and reuse pooled connections, so repeated calls skip the TLS handshake. Idle connections stay open for `keepalive_expiry` seconds (60 by default).

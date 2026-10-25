@@ -1,0 +1,138 @@
+---
+title: RouteHub quickstart
+sidebarTitle: Quickstart
+description: Make your first call, switch providers, stream, run async and call tools with RouteHub
+---
+
+<Note>
+  Before you begin, [install RouteHub](/routehub/installation) and set an API key for at least one provider.
+</Note>
+
+## Make your first call
+
+<Steps>
+  <Step title="Set a provider key">
+    ```bash
+    export OPENAI_API_KEY="sk-..."
+    ```
+  </Step>
+
+  <Step title="Call a model">
+    ```python
+    import routehub
+
+    response = routehub.completion(
+        model="gpt-5.4-mini",
+        messages=[{"role": "user", "content": "Summarize our Q3 risks in three bullets."}],
+    )
+    print(response.choices[0].message.content)
+    print(response.usage.total_tokens)
+    ```
+
+    `response` is an `openai.types.chat.ChatCompletion`, the same object the OpenAI SDK returns.
+  </Step>
+
+  <Step title="Switch providers">
+    Change the model string to change providers. The call and the response type stay the same:
+
+    ```python
+    messages = [{"role": "user", "content": "Summarize our Q3 risks in three bullets."}]
+
+    routehub.completion(model="claude-sonnet-4-6", messages=messages)
+    routehub.completion(model="gemini/gemini-3-flash-preview", messages=messages)
+    routehub.completion(model="groq/llama-3.3-70b-versatile", messages=messages)
+    routehub.completion(model="openrouter/anthropic/claude-sonnet-4.6", messages=messages)
+    ```
+
+    Each provider reads its own key variable, such as `ANTHROPIC_API_KEY` or `GROQ_API_KEY`. See [Providers](/routehub/providers).
+  </Step>
+</Steps>
+
+## Stream a response
+
+Pass `stream=True` to get an iterator of `ChatCompletionChunk` objects:
+
+```python
+for chunk in routehub.completion(
+    model="claude-sonnet-4-6", messages=messages, stream=True
+):
+    if chunk.choices:
+        print(chunk.choices[0].delta.content or "", end="")
+```
+
+## Run async
+
+`acompletion` takes exactly the same arguments as `completion`:
+
+```python
+import asyncio
+
+import routehub
+
+
+async def main():
+    response = await routehub.acompletion(
+        model="gpt-5.4-mini", messages=messages
+    )
+    print(response.choices[0].message.content)
+
+
+asyncio.run(main())
+```
+
+## Call a tool
+
+Tools use the OpenAI format for every provider. RouteHub translates them for Claude.
+
+```python
+weather = {
+    "type": "function",
+    "function": {
+        "name": "get_weather",
+        "description": "Get the weather for a city.",
+        "parameters": {
+            "type": "object",
+            "properties": {"city": {"type": "string"}},
+            "required": ["city"],
+        },
+    },
+}
+
+response = routehub.completion(
+    model="claude-sonnet-4-6",
+    messages=[{"role": "user", "content": "Weather in Paris?"}],
+    tools=[weather],
+)
+call = response.choices[0].message.tool_calls[0]
+print(call.function.name, call.function.arguments)
+```
+
+## Handle errors
+
+Every provider failure is raised as a typed exception:
+
+```python
+try:
+    routehub.completion(model="gpt-5.4-mini", messages=messages, num_retries=3)
+except routehub.ContextWindowExceededError:
+    ...  # trim the conversation and retry
+except routehub.RateLimitError as error:
+    print(error.status_code, error.llm_provider, error.model)
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Streaming and async" icon="wave-square" href="/routehub/streaming-and-async">
+    Usage on streams, context managers and async streams
+  </Card>
+  <Card title="Tool calling" icon="wrench" href="/routehub/tool-calling">
+    Run a complete tool loop
+  </Card>
+  <Card title="Structured output" icon="brackets-curly" href="/routehub/structured-output">
+    Get JSON that matches a pydantic model
+  </Card>
+  <Card title="Reasoning" icon="brain" href="/routehub/reasoning">
+    Control thinking with one argument across providers
+  </Card>
+</CardGroup>

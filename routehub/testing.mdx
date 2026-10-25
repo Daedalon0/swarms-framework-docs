@@ -1,0 +1,73 @@
+---
+title: Testing without a provider
+sidebarTitle: Testing
+description: Return realistic responses, streams and errors with mock_response, without a network call or API key
+---
+
+`mock_response` makes `completion` and `acompletion` return a real `ChatCompletion` without sending a request. No API key is needed, so your test suite stays offline.
+
+```python
+import routehub
+
+messages = [{"role": "user", "content": "Approve this expense?"}]
+
+reply = routehub.completion(
+    model="gpt-5.4-mini",
+    messages=messages,
+    mock_response="Approved.",
+)
+assert reply.choices[0].message.content == "Approved."
+```
+
+## Mock a stream
+
+With `stream=True`, the mock returns a stream of chunks split on spaces. Async streams work too.
+
+```python
+stream = routehub.completion(
+    model="claude-sonnet-4-6",
+    messages=messages,
+    mock_response="Approved after review.",
+    stream=True,
+)
+text = "".join(
+    chunk.choices[0].delta.content or ""
+    for chunk in stream
+    if chunk.choices
+)
+assert text == "Approved after review."
+```
+
+## Rehearse failures
+
+Pass an exception to have it raised as given. Use this to test retry and fallback logic:
+
+```python
+try:
+    routehub.completion(
+        model="gpt-5.4-mini",
+        messages=messages,
+        mock_response=routehub.RateLimitError("simulated"),
+    )
+except routehub.RateLimitError as error:
+    assert error.status_code == 429
+```
+
+```python
+import pytest
+
+
+def test_timeout_is_handled():
+    with pytest.raises(TimeoutError):
+        routehub.completion(
+            model="gpt-5.4-mini",
+            messages=messages,
+            mock_response=TimeoutError("simulated outage"),
+        )
+```
+
+## Limits of mocking
+
+- The model string is not resolved, so a mock does not catch a wrong model name. Use `routehub.get_llm_provider(model)` to check one.
+- Usage counts are rough estimates.
+- `embedding` and `responses` have no `mock_response`. For embeddings, pass `client=` a fake OpenAI client instead.

@@ -229,6 +229,42 @@
         ]
       },
       {
+        "tab": "RouteHub",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "routehub/overview",
+              "routehub/installation",
+              "routehub/quickstart",
+              "routehub/providers"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "routehub/streaming-and-async",
+              "routehub/tool-calling",
+              "routehub/structured-output",
+              "routehub/reasoning",
+              "routehub/prompt-caching",
+              "routehub/embeddings-and-responses",
+              "routehub/batches",
+              "routehub/testing"
+            ]
+          },
+          {
+            "group": "Reference",
+            "pages": [
+              "routehub/configuration",
+              "routehub/error-handling",
+              "routehub/model-catalog",
+              "routehub/migrating-from-litellm"
+            ]
+          }
+        ]
+      },
+      {
         "tab": "Examples",
         "groups": [
           {

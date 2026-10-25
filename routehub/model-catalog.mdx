@@ -1,0 +1,102 @@
+---
+title: Model catalog and token counting
+sidebarTitle: Model catalog
+description: Look up context windows, prices and capabilities, list models from each provider's API, and count tokens
+---
+
+## Look up a model
+
+```python
+import routehub
+
+info = routehub.get_model_info("claude-sonnet-4-6")
+info["max_input_tokens"]        # 1000000
+info["max_output_tokens"]       # 128000
+info["input_cost_per_token"]    # 3e-06
+info["supports_reasoning"]      # True
+
+routehub.get_max_tokens("gpt-5.4-mini")       # 128000
+routehub.supports_vision("gpt-5.4-mini")      # True
+routehub.supports_function_calling("deepseek/deepseek-chat")
+"claude-sonnet-4-6" in routehub.model_list    # True
+```
+
+The data comes from [OpenRouter's model list](https://openrouter.ai/api/v1/models), fetched on first use and cached for five minutes. If a refresh fails, the previous data is kept. Each successful fetch is also written to `~/.cache/routehub/openrouter_models.json` (or `$XDG_CACHE_HOME/routehub`), and that file is used when OpenRouter can't be reached, so an offline or air-gapped run keeps the catalog it last saw. Set `ROUTEHUB_CACHE_DIR` to move the file, or to `off` to disable it.
+
+The `supports_*` functions return `False` for unknown models, and `get_model_info` raises `ModelNotMappedError`. Prices can be `None`.
+
+### Capability checks
+
+`supports_vision`, `supports_reasoning`, `supports_function_calling`, `supports_parallel_function_calling`, `supports_response_schema`, `supports_prompt_caching`, `supports_tool_choice`, `supports_system_messages`, `supports_pdf_input`, `supports_audio_input`, `supports_audio_output`, `supports_web_search`, `supports_computer_use` and `supports_assistant_prefill` all take a model string.
+
+### How names are matched
+
+- Anthropic-style names find OpenRouter's: `claude-opus-4-7-20251001` finds `anthropic/claude-opus-4.7`.
+- Serving providers' IDs find the vendor's entry. `groq/llama-3.3-70b-versatile`, `together_ai/meta-llama/Llama-3.3-70B-Instruct-Turbo` and `cerebras/llama3.3-70b` all resolve to `meta-llama/llama-3.3-70b-instruct`. Output limits come from the vendor's entry and may differ from what the serving provider allows.
+- Embedding models, which OpenRouter doesn't list, come from a small built-in table: `text-embedding-3-small`, `text-embedding-3-large`, `text-embedding-ada-002`, `gemini-embedding-001` and `mistral-embed`.
+
+Every entry carries `provider`, the RouteHub provider that serves it. `litellm_provider` holds the same value for code written against litellm.
+
+## Compute the cost of a call
+
+Multiply the usage from a response by the prices from the catalog:
+
+```python
+response = routehub.completion(model="claude-sonnet-4-6", messages=messages)
+info = routehub.get_model_info("claude-sonnet-4-6")
+
+cost = (
+    response.usage.prompt_tokens * (info["input_cost_per_token"] or 0)
+    + response.usage.completion_tokens * (info["output_cost_per_token"] or 0)
+)
+print(f"${cost:.6f}")
+```
+
+## Register your own models
+
+Register private, fine-tuned or self-hosted models. Registered entries take priority and never expire:
+
+```python
+routehub.register_model({
+    "acme-support-ft": {
+        "max_input_tokens": 32768,
+        "max_output_tokens": 4096,
+        "supports_function_calling": True,
+        "input_cost_per_token": 0.000002,
+    }
+})
+```
+
+## List models from every provider
+
+`get_all_models` asks each provider's own models API what it serves, concurrently, and returns one consistent shape:
+
+```python
+from routehub.get_all_models import get_all_models, get_model
+
+models = get_all_models()   # every provider with a key configured, plus OpenRouter
+chat = [m for m in models if m["type"] == "chat"]
+
+get_all_models(["anthropic", "gemini"])          # selected providers only
+get_model("anthropic", "claude-sonnet-4-6")      # one model, from the per-model endpoint
+get_model("openrouter", "anthropic/claude-sonnet-4.6")["endpoints"]  # every host serving it
+```
+
+Sources are OpenRouter (no key needed), OpenAI, Anthropic, Gemini, Groq, xAI, DeepSeek, Mistral, Together, Fireworks, Cerebras, Cohere, and a local Ollama server when `OLLAMA_API_BASE` is set.
+
+<Accordion title="Fields on each entry">
+  `id`, `provider`, `model`, `name`, `type`, `context_window`, `max_output_tokens`, `input_modalities`, `output_modalities`, `supports_vision`, `supports_function_calling`, `supports_reasoning`, `supports_structured_output`, `input_cost_per_token`, `output_cost_per_token`, `created`, `endpoints` and the provider's `raw` record. A field is `None` where the provider doesn't report it.
+</Accordion>
+
+Results are cached per provider for five minutes, failures included, so an unavailable provider is retried once per window rather than on every call. Pass `refresh=True` to fetch again, or call `clear_cache()`. `aget_all_models` and `aget_models` are the async forms.
+
+## Count tokens
+
+```python
+routehub.encode(model="gpt-5.4-mini", text="hello world")   # token ids
+routehub.decode(model="gpt-5.4-mini", tokens=[24912, 2375])
+routehub.token_counter(model="gpt-5.4-mini", messages=messages)
+routehub.token_counter(model="gpt-5.4-mini", text="a plain string")
+```
+
+Counting uses tiktoken with the model's encoding, or `o200k_base` for models tiktoken doesn't know, so counts for non-OpenAI models are estimates. When no tokenizer can be loaded, for example offline before tiktoken has cached its files, counts fall back to four bytes per token.

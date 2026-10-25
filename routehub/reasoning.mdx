@@ -1,0 +1,71 @@
+---
+title: Reasoning
+description: Control thinking with reasoning_effort across OpenAI, Claude, Gemini and DeepSeek, and read reasoning output and tokens
+---
+
+## Set the reasoning effort
+
+`reasoning_effort` works the same way on every provider that supports reasoning:
+
+```python
+import routehub
+
+response = routehub.completion(
+    model="claude-sonnet-4-6",
+    messages=[{"role": "user", "content": "Plan a zero-downtime database migration."}],
+    reasoning_effort="medium",
+)
+message = response.choices[0].message
+print(getattr(message, "reasoning_content", None))
+print(message.content)
+```
+
+It takes one of `routehub.REASONING_EFFORTS`: `"none"`, `"minimal"`, `"low"`, `"medium"`, `"high"` or `"xhigh"`.
+
+| Provider | What RouteHub sends |
+|---|---|
+| OpenAI-compatible providers | `reasoning_effort` as given |
+| Claude before 4.7 | A thinking budget: 1,024 tokens for minimal and low, 2,048 for medium, 4,096 for high, 8,192 for xhigh. `max_tokens` is raised above the budget when needed. |
+| Claude 4.7 and later (Opus 4.7, Claude 5 models) | Adaptive thinking at that effort |
+
+## Configure Claude's thinking directly
+
+Pass `thinking=` to set Claude's thinking yourself. It wins over `reasoning_effort`:
+
+```python
+response = routehub.completion(
+    model="claude-sonnet-4-6",
+    messages=messages,
+    thinking={"type": "enabled", "budget_tokens": 2048},
+)
+```
+
+<Warning>
+  Claude 4.7 and later reject `temperature`, `top_p` and `top_k` on every call. RouteHub raises `UnsupportedParamsError`, or drops them when you pass `drop_params=True`.
+</Warning>
+
+## Read reasoning output
+
+`reasoning_content` (text) and `thinking_blocks` (Claude's signed blocks) exist on the message only when the provider returned reasoning, so read them with `getattr`. DeepSeek's `reasoning_content` comes through the same way.
+
+In a Claude tool loop with thinking, send `thinking_blocks` back on the assistant message, as Anthropic requires. Appending `message.model_dump(exclude_none=True)` does this for you. See [Tool calling](/routehub/tool-calling).
+
+## Count reasoning tokens
+
+Thinking tokens are reported in `usage.completion_tokens_details.reasoning_tokens` and counted in `completion_tokens`, as OpenAI does:
+
+```python
+details = response.usage.completion_tokens_details
+print(details.reasoning_tokens if details else 0)
+```
+
+Gemini's OpenAI-compatible endpoint bills reasoning in `total_tokens` only, so RouteHub fills in the difference. An answer that spent its whole `max_tokens` budget thinking comes back with `finish_reason == "length"`, empty content, and a usage block that adds up.
+
+## Check reasoning support
+
+```python
+routehub.supports_reasoning("claude-sonnet-4-6")  # True
+routehub.get_reasoning_efforts()  # ("none", "minimal", "low", "medium", "high", "xhigh")
+```
+
+Pass `drop_params=True` to drop `reasoning_effort` on models that don't support reasoning instead of failing.

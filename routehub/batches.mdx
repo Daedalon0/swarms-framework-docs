@@ -1,0 +1,66 @@
+---
+title: Batches
+description: Run large jobs at about half price through OpenAI, Groq and Anthropic batch APIs
+---
+
+`batched_completions` sends many chat requests through a provider's batch API. Batches cost about half as much as regular calls and finish within 24 hours.
+
+| Provider | Batch API | Example model |
+|---|---|---|
+| OpenAI | Batch API | `gpt-5.4-mini` |
+| Groq | Batch API | `groq/llama-3.1-8b-instant` |
+| Anthropic | Message Batches API | `claude-sonnet-4-6` |
+
+Other providers raise `BadRequestError`.
+
+## Run a batch and wait
+
+```python
+import routehub
+
+tickets = ["Refund not received", "App crashes on login", "Love the new UI"]
+
+results = routehub.batched_completions(
+    model="gpt-5.4-mini",
+    requests=[
+        {"messages": [{"role": "user", "content": f"Classify: {t}"}], "max_tokens": 20}
+        for t in tickets
+    ],
+    temperature=0,
+)
+
+for ticket, result in zip(tickets, results):
+    if isinstance(result, Exception):
+        print(ticket, "failed:", result)
+    else:
+        print(ticket, "->", result.choices[0].message.content)
+```
+
+- Each request takes the same arguments as `completion`, and is built exactly as a direct call would be.
+- Keyword arguments such as `api_key` or `temperature` apply to every request.
+- The call polls every `poll_interval` seconds (30 by default) and returns one `ChatCompletion` per request, in request order.
+- A request that failed comes back as its RouteHub exception without failing the rest.
+- It raises `Timeout` after `timeout` seconds (24 hours by default). The batch keeps running and you can still collect it.
+
+## Submit now, collect later
+
+Pass `wait=False` to get a `BatchJob` back at once:
+
+```python
+job = routehub.batched_completions(
+    model="claude-sonnet-4-6", requests=requests, wait=False
+)
+print(job.id, job.status())
+```
+
+`BatchJob` has `status()`, `results()` and `cancel()`. Another process can collect the work from the provider name and batch ID:
+
+```python
+results = routehub.BatchJob("openai", job_id).results()
+results = routehub.BatchJob("groq", job_id).results()
+results = routehub.BatchJob("anthropic", job_id).results()
+```
+
+## Async
+
+`await routehub.abatched_completions(...)` takes the same arguments and keeps the event loop free while the batch runs.

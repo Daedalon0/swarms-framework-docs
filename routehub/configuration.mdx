@@ -1,0 +1,120 @@
+---
+title: Configuration
+description: Per-call settings for retries, timeouts, TLS, parameter dropping and custom clients, plus RouteHub's environment variables
+---
+
+Every setting is an argument to the call. Nothing is configured globally, so one tenant's `ssl_verify=False` or retry policy never leaks into another's when many teams or agents share a process.
+
+```python
+import routehub
+
+response = routehub.completion(
+    model="gpt-5.4-mini",
+    messages=messages,
+    num_retries=3,
+    drop_params=True,
+    ssl_verify="/etc/ssl/certs/corp-ca.pem",
+    timeout=30,
+    keepalive_expiry=30.0,
+)
+```
+
+<Warning>
+  RouteHub reads no module attributes. `routehub.drop_params = True` sets an attribute nothing reads. To apply settings to every call, wrap the function once:
+
+  ```python
+  from functools import partial
+
+  complete = partial(routehub.completion, num_retries=3, drop_params=True)
+  ```
+</Warning>
+
+## Gateway options
+
+<ParamField path="num_retries" type="int" default="2">
+  Retries on rate limits, server errors, timeouts and connection failures, with exponential backoff that honours `retry-after`. `None` means 2.
+</ParamField>
+
+<ParamField path="drop_params" type="bool" default="False">
+  Drop what the model rejects instead of failing: sampling parameters on OpenAI reasoning models, `reasoning_effort` on models without reasoning, thinking on older Claude models, sampling on Claude 4.7 and later, and forced `tool_choice` on Claude 5.1 and later. Unknown keyword arguments are then not sent either.
+</ParamField>
+
+<ParamField path="ssl_verify" type="bool | str" default="True">
+  TLS verification, or a path to a corporate CA bundle.
+</ParamField>
+
+<ParamField path="request_timeout" type="float" default="600.0">
+  Request timeout in seconds. `timeout=` wins when set.
+</ParamField>
+
+<ParamField path="keepalive_expiry" type="float" default="60.0">
+  Seconds an idle pooled connection stays open, so agent steps that arrive a few seconds apart reuse the same connection.
+</ParamField>
+
+<ParamField path="gzip" type="bool" default="None">
+  Gzip the request body sent to Claude's Messages API, which saves upload time on long histories. OpenAI-compatible providers always get an uncompressed body. `None` reads `ROUTEHUB_GZIP_ON`.
+</ParamField>
+
+<ParamField path="set_verbose" type="bool" default="False">
+  Print the provider, model, parameter names and timing to stderr. API keys and message content are never printed.
+</ParamField>
+
+<ParamField path="client" type="OpenAI | AsyncOpenAI | httpx.Client" default="None">
+  Your own configured client: `openai.OpenAI` or `AsyncOpenAI` for OpenAI-compatible providers, an httpx `Client` or `AsyncClient` for Claude. No API key is required, and the client's own TLS, pool and retry settings apply.
+</ParamField>
+
+<ParamField path="mock_response" type="str | Exception" default="None">
+  Return a canned response, or raise the given exception, without a network call. See [Testing](/routehub/testing).
+</ParamField>
+
+## Provider options
+
+<ParamField path="api_key" type="str">
+  The provider's API key. Defaults to the provider's environment variable, read on each call.
+</ParamField>
+
+<ParamField path="api_base" type="str">
+  Base URL for a proxy, private endpoint or self-hosted server. `base_url=` is an alias.
+</ParamField>
+
+<ParamField path="api_version" type="str">
+  API version, for Azure OpenAI.
+</ParamField>
+
+<ParamField path="custom_llm_provider" type="str">
+  The provider for a model string without a prefix.
+</ParamField>
+
+<ParamField path="extra_headers" type="dict">
+  Extra HTTP headers for the request.
+</ParamField>
+
+<ParamField path="extra_body" type="dict">
+  Extra fields merged into the request body. Always sent, even with `drop_params`.
+</ParamField>
+
+Any other OpenAI parameter, such as `stop`, `seed`, `n`, `logprobs` or `prompt_cache_key`, can be passed by name. Unrecognized keyword arguments are sent in the request body unless `drop_params` is on.
+
+## Use your own client
+
+Pass a configured client to route through a proxy, use mTLS or set your own pool limits:
+
+```python
+import openai
+
+proxy = openai.OpenAI(
+    base_url="https://llm-proxy.internal/v1", api_key="sk-proxy"
+)
+response = routehub.completion(
+    model="gpt-5.4-mini", messages=messages, client=proxy
+)
+```
+
+## Environment variables
+
+| Variable | Effect |
+|---|---|
+| Provider keys and bases | See [Providers](/routehub/providers). Read on each call. |
+| `ROUTEHUB_USE_ORJSON` | RouteHub uses `orjson` for JSON when it is installed (the `fast` extra). Set this to `0`, `false`, `no` or `off` to use the standard `json` module. Read once, on first use. |
+| `ROUTEHUB_GZIP_ON` | Set to `1`, `true`, `yes` or `on` to gzip Claude request bodies when a call doesn't pass `gzip=`. An explicit `gzip=False` still wins. Read on each call. |
+| `ROUTEHUB_CACHE_DIR` | Directory for the on-disk copy of the model catalog, used when OpenRouter is unreachable. Defaults to `$XDG_CACHE_HOME/routehub` or `~/.cache/routehub`. Set to `off` to keep nothing on disk. Read on each fetch. |

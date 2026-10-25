@@ -1,0 +1,53 @@
+---
+title: Embeddings and the Responses API
+sidebarTitle: Embeddings and Responses
+description: Create embeddings on any OpenAI-compatible endpoint and call the OpenAI Responses API through RouteHub
+---
+
+## Create embeddings
+
+```python
+import routehub
+
+response = routehub.embedding(
+    model="text-embedding-3-small",
+    input=["first text", "second text"],
+)
+vectors = [item.embedding for item in response.data]
+print(len(vectors), len(vectors[0]))
+```
+
+`embedding` returns `openai.types.CreateEmbeddingResponse`. Any OpenAI-compatible embeddings endpoint works, such as Gemini, Mistral or a local Ollama server:
+
+```python
+routehub.embedding(model="gemini/gemini-embedding-001", input="hello")
+routehub.embedding(model="mistral/mistral-embed", input="hello")
+routehub.embedding(model="ollama/nomic-embed-text", input="hello")
+```
+
+`aembedding` is the async form and takes the same arguments.
+
+<Note>
+  Anthropic has no embeddings API, so `embedding` with a Claude model raises `BadRequestError`.
+</Note>
+
+## Call the Responses API
+
+`responses` sends a request to the OpenAI Responses API and returns the SDK's own `Response` object, or its event stream when you pass `stream=True`:
+
+```python
+response = routehub.responses(
+    model="gpt-5.4",
+    input="Write a one-line release note for a faster import.",
+    reasoning={"effort": "low"},
+)
+print(response.output_text)
+```
+
+It takes the same gateway options as `completion`, such as `api_key`, `api_base`, `num_retries`, `drop_params` and `client`, alongside any Responses API parameter. `aresponses` is the async form.
+
+Errors are mapped to the same typed exceptions as `completion`. See [Error handling](/routehub/error-handling).
+
+<Note>
+  `responses` does not support `mock_response`. Use a provider that implements the OpenAI Responses API, such as OpenAI.
+</Note>

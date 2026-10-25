@@ -1,0 +1,101 @@
+---
+title: Install RouteHub
+sidebarTitle: Installation
+description: Install RouteHub from PyPI with pip or uv, with optional orjson support
+---
+
+## Prerequisites
+
+- **Python 3.10 or higher**
+- An API key for at least one provider, or a local server such as Ollama
+
+## Install the package
+
+<CodeGroup>
+
+```bash pip
+pip install -U routehub
+```
+
+```bash uv
+uv add routehub
+```
+
+```bash poetry
+poetry add routehub
+```
+
+```bash From source
+git clone https://github.com/The-Swarm-Corporation/RouteHub.git
+cd RouteHub
+pip install -e .
+```
+
+</CodeGroup>
+
+RouteHub has three direct dependencies: `openai`, `pydantic` and `tiktoken`. It works with openai 2.x and 3.x.
+
+## Faster JSON with the `fast` extra
+
+The `fast` extra installs [orjson](https://github.com/ijl/orjson), which RouteHub uses for JSON encoding and decoding when it is available.
+
+<CodeGroup>
+
+```bash pip
+pip install "routehub[fast]"
+```
+
+```bash uv
+uv add "routehub[fast]"
+```
+
+</CodeGroup>
+
+<Tip>
+  Set `ROUTEHUB_USE_ORJSON=0` to fall back to the standard `json` module without uninstalling orjson.
+</Tip>
+
+## Set a provider key
+
+RouteHub reads each provider's key from its environment variable on every call. Set the ones you need:
+
+```bash
+export OPENAI_API_KEY="sk-..."
+export ANTHROPIC_API_KEY="sk-ant-..."
+export GEMINI_API_KEY="..."
+export GROQ_API_KEY="gsk_..."
+```
+
+You can also pass `api_key=` to any call. See [Providers](/routehub/providers) for every variable name.
+
+<Warning>
+  Keep keys in a `.env` file or a secrets manager and never commit them. RouteHub never writes keys to logs, including with `set_verbose=True`.
+</Warning>
+
+## Verify the install
+
+`mock_response` returns a real `ChatCompletion` without a network call or an API key, so you can check the install offline:
+
+```python
+import routehub
+
+print(routehub.__version__)
+
+response = routehub.completion(
+    model="gpt-5.4-mini",
+    messages=[{"role": "user", "content": "ping"}],
+    mock_response="pong",
+)
+print(response.choices[0].message.content)  # pong
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/routehub/quickstart">
+    Make your first real call
+  </Card>
+  <Card title="Configuration" icon="sliders" href="/routehub/configuration">
+    Retries, timeouts, TLS and environment variables
+  </Card>
+</CardGroup>

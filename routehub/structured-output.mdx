@@ -1,0 +1,49 @@
+---
+title: Structured output
+description: Get JSON that matches a pydantic model or JSON schema from any provider
+---
+
+Pass a pydantic model as `response_format` to get JSON that matches it:
+
+```python
+from pydantic import BaseModel
+
+import routehub
+
+
+class RiskReport(BaseModel):
+    title: str
+    severity: int
+
+
+response = routehub.completion(
+    model="gpt-5.4-mini",
+    messages=[{"role": "user", "content": "Assess the main risk of a single-region deployment."}],
+    response_format=RiskReport,
+)
+report = RiskReport.model_validate_json(
+    response.choices[0].message.content
+)
+print(report.title, report.severity)
+```
+
+## How it works
+
+- A pydantic class becomes a strict `json_schema` response format.
+- A dict is sent as given, so you can pass `{"type": "json_object"}` or your own `json_schema` block.
+- The JSON arrives as the message content string. Parse it yourself, as above.
+- For Claude, RouteHub enforces the schema through a forced tool call, or native structured output on Claude 5.1 and later, and still returns the result as the message content.
+
+The same code works on every provider that supports structured output:
+
+```python
+for model in ["gpt-5.4-mini", "claude-sonnet-4-6", "gemini/gemini-3-flash-preview"]:
+    response = routehub.completion(
+        model=model, messages=messages, response_format=RiskReport
+    )
+    print(model, RiskReport.model_validate_json(response.choices[0].message.content))
+```
+
+<Tip>
+  `routehub.supports_response_schema(model)` tells you whether the catalog lists structured-output support for a model. See [Model catalog](/routehub/model-catalog).
+</Tip>

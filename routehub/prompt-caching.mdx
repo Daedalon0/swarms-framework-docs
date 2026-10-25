@@ -1,0 +1,62 @@
+---
+title: Prompt caching
+description: Cache long system prompts and tools on Claude with cache_control and read cached-token usage
+---
+
+RouteHub calls Claude's native Messages API, so Anthropic's prompt caching works as documented by Anthropic. Mark the content you want cached with `cache_control`:
+
+```python
+import routehub
+
+policy_handbook = open("handbook.md").read()
+
+messages = [
+    {
+        "role": "system",
+        "content": [
+            {
+                "type": "text",
+                "text": policy_handbook,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ],
+    },
+    {"role": "user", "content": "Which policies cover vendor onboarding?"},
+]
+
+response = routehub.completion(model="claude-sonnet-4-6", messages=messages)
+
+details = response.usage.prompt_tokens_details
+print(details.cached_tokens if details else 0)        # tokens read from cache
+print(response.usage.cache_creation_input_tokens)     # tokens written to cache
+```
+
+The second call with the same prefix reads the handbook from cache, at a fraction of the input price.
+
+## How markers are handled
+
+| Provider | `cache_control` markers |
+|---|---|
+| Anthropic | Sent unchanged on content blocks and tool definitions |
+| OpenRouter | Passed through |
+| Every other provider | Stripped before sending |
+
+For Claude, `prompt_tokens` includes cache reads and writes, so cost accounting stays correct. Usage also carries `cache_read_input_tokens` and `cache_creation_input_tokens`.
+
+## Check support
+
+```python
+routehub.supports_prompt_caching("claude-sonnet-4-6")               # True
+routehub.supports_prompt_caching("openrouter/anthropic/claude-sonnet-4.6")  # True
+routehub.supports_prompt_caching("gpt-5.4-mini")                    # False
+```
+
+`supports_prompt_caching` answers `True` only where markers are honoured, which is Claude, directly or through OpenRouter.
+
+<Note>
+  OpenAI caches long prompts on its own, with no markers, and reports the hits in `usage.prompt_tokens_details.cached_tokens`. Gemini has a separate caching API. Both answer `False` from `supports_prompt_caching` even though their catalog entries carry a cache-read price.
+</Note>
+
+## Compress long Claude requests
+
+Long cached histories still have to be uploaded on every call. Pass `gzip=True`, or set `ROUTEHUB_GZIP_ON=1`, to gzip the request body sent to Claude's Messages API. OpenAI-compatible providers always get an uncompressed body.

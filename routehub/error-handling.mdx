@@ -1,0 +1,74 @@
+---
+title: Error handling
+description: Typed exceptions for every provider failure, compatible with the OpenAI SDK's own exceptions
+---
+
+Every provider failure is raised as a typed RouteHub exception carrying the status code, provider and model. Each one subclasses the matching OpenAI SDK exception, so existing `except openai.RateLimitError` handlers keep working. The original error is chained as `__cause__`.
+
+```python
+import routehub
+
+try:
+    routehub.completion(model="gpt-5.4-mini", messages=messages, num_retries=3)
+except routehub.ContextWindowExceededError:
+    ...  # trim the conversation and retry
+except routehub.RateLimitError as error:
+    print(error.status_code, error.llm_provider, error.model)
+```
+
+## Exceptions
+
+| Exception | Raised when |
+|---|---|
+| `BadRequestError` | 400, or a bad model string or empty `messages` before any request |
+| `UnsupportedParamsError` | a parameter the model rejects, before any request (subclass of `BadRequestError`) |
+| `ContextWindowExceededError` | 413, or a 400 saying the prompt is too long |
+| `ContentPolicyViolationError` | a 400 citing content policy |
+| `AuthenticationError` | 401, or no API key configured (before any request) |
+| `PermissionDeniedError` | 403 |
+| `NotFoundError` | 404 |
+| `UnprocessableEntityError` | 422 |
+| `RateLimitError` | 429 |
+| `ServiceUnavailableError` | 503, or Anthropic's 529 overloaded |
+| `InternalServerError` | any other 5xx |
+| `APIError` | any other error status |
+| `Timeout` | the request timed out |
+| `APIConnectionError` | the provider could not be reached |
+| `ModelNotMappedError` | `get_model_info` or `get_max_tokens` on an unknown model (a plain `Exception`) |
+
+All of them are importable from `routehub` or `routehub.exceptions`.
+
+<Note>
+  `Timeout` is not a `routehub.APIConnectionError`, and `ServiceUnavailableError` is not a `routehub.InternalServerError`. Catch `openai.APIConnectionError` or `openai.InternalServerError` to cover both.
+</Note>
+
+## Retries
+
+RouteHub retries rate limits, 5xx errors, timeouts and connection failures twice by default, with exponential backoff that honours `retry-after`. Set `num_retries=` per call, or `num_retries=0` to handle every failure yourself.
+
+## Fall back to another model
+
+RouteHub has no `fallbacks` argument. Catch the error and call the next model:
+
+```python
+import openai
+
+MODELS = ["claude-sonnet-4-6", "gpt-5.4-mini", "gemini/gemini-3-flash-preview"]
+
+
+def complete_with_fallback(messages):
+    for model in MODELS:
+        try:
+            return routehub.completion(model=model, messages=messages)
+        except (
+            routehub.RateLimitError,
+            openai.InternalServerError,
+            openai.APIConnectionError,
+        ):
+            continue
+    raise RuntimeError("every model failed")
+```
+
+## Errors inside a stream
+
+Errors raised mid-stream, such as an overloaded event from Claude, are mapped to the same exceptions, so the same handlers cover streaming and non-streaming calls.
