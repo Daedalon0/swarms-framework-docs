@@ -147,7 +147,7 @@ Simulates an expert panel discussion with a moderator guiding the conversation. 
 
 The moderator receives the round's expert replies as a labelled transcript, one `Expert_Name: reply` block per expert. A run makes `1 + N + max_rounds * (N + 2)` agent calls for `N` experts.
 
-Like `OneOnOneDebate`, the panel records whatever each agent's `run()` returns. Give the moderator and experts `output_type="final"` so only their replies are recorded and passed on.
+The panel records and passes on each agent's final answer when available, rather than its whole transcript. If an agent has no usable final answer in memory, the panel falls back to that agent's `run()` return value. Setting `output_type="final"` on the moderator and experts is optional when their final answers are available.
 
 ### Attributes
 
